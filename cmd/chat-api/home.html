@@ -61,7 +61,7 @@ window.onload = function () {
                 },
                 "message": chatMsgElement.value
             }));
-            chatMsgElement.value = "";
+            // chatMsgElement.value = "";
         } catch(e) {
                 console.log("ERROR: " + e)
         }
@@ -87,7 +87,7 @@ window.onload = function () {
                 console.log("no message")
                 return false;
             }
-            // conn.send(chatMsgElement.value);
+            // conn.send(systemMsgElement.value);
             sendHttp('POST', 'http://localhost:8080/system-message', JSON.stringify({
                 "session_id": sessionIDElement.value,
                 "user_id": userIDElement.value,
@@ -96,7 +96,7 @@ window.onload = function () {
                 },
                 "message": systemMsgElement.value
             }));
-            chatMsgElement.value = "";
+            // systemMsgElement.value = "";
         } catch(e) {
                 console.log("ERROR: " + e)
         }

@@ -1,8 +1,8 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +75,8 @@ func (client *Client) SessionID() string {
 	return client.sessionID
 }
 
+// NOTE: I chose to do only pushing with this websocket in order to keep things lightweight.
+// The following method would do something with messages coming into the server.
 // // HandleInboundMessages pumps messages from the websocket connection to the server.
 // //
 // // The application runs readPump in a per-connection goroutine. The application
@@ -108,12 +110,18 @@ func (client *Client) SessionID() string {
 // }
 
 func (client *Client) Close(err error) {
-	logrus.WithFields(logrus.Fields{
+	errBytes := []byte{}
+	if err != nil {
+		errBytes = []byte(err.Error())
+	}
+	logrus.WithError(err).WithFields(logrus.Fields{
 		"UserID":    client.UserID,
 		"SesisonID": client.SessionID(),
-	}).Infof("client closed")
-	client.conn.Close()
-	client.conn.WriteMessage(websocket.CloseMessage, []byte(err.Error()))
+	}).Infof("closing client")
+	if client.conn != nil {
+		client.conn.WriteMessage(websocket.CloseMessage, errBytes)
+		client.conn.Close()
+	}
 }
 
 // HandleOutboundMessages pumps messages from the server to the websocket connection.
@@ -121,32 +129,35 @@ func (client *Client) Close(err error) {
 // A goroutine running writePump is started for each connection. The
 // application ensures that there is at most one writer to a connection by
 // executing all writes from this goroutine.
-func (client *Client) HandleOutboundMessages(server *Server, readyChan chan bool) {
-	logrus.WithFields(logrus.Fields{
-		"client.UserID": client.UserID,
-	}).Infof("HandleOutboundMessages:Start")
+func (client *Client) HandleOutboundMessages(ctx context.Context, server *Server, readyChan chan bool) {
+	logEntry := logrus.WithFields(logrus.Fields{
+		"client.UserID":    client.UserID,
+		"client.SessionID": client.SessionID(),
+	})
+	logEntry.Infof("HandleOutboundMessages:Start")
 	ticker := time.NewTicker(pingPeriod)
-	var clientErr error
 	defer func() {
-		logrus.WithError(clientErr).WithFields(logrus.Fields{
-			"client.UserID": client.UserID,
-		}).Infof("HandleOutboundMessages:End")
+		logEntry.Infof("HandleOutboundMessages:End")
 		// When we exit this goroutine, then we close the client and unregister it.
 		ticker.Stop()
-		client.Close(clientErr)
-		server.UnregisterClient(client)
 	}()
 	readyChan <- true
 	for {
 		select {
+
+		// [CASE] Context was cancelled, and we need to bail!
+		case <-ctx.Done():
+			logEntry.Infof("context cancelled; quitting client HandleOutboundMessages goroutine")
+			return
+
+		// [CASE] Receive a message from the Server to convey to the Client's Connection.
 		case message, ok := <-client.send:
-			logrus.WithFields(logrus.Fields{
+			logEntry.WithFields(logrus.Fields{
 				"message": message,
 				"ok":      ok,
 			}).Infof("client: send")
 			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				clientErr = fmt.Errorf("connection timeout")
 				return
 			}
 
@@ -169,7 +180,7 @@ func (client *Client) HandleOutboundMessages(server *Server, readyChan chan bool
 			if err != nil {
 				return
 			}
-			logrus.WithFields(logrus.Fields{
+			logEntry.WithFields(logrus.Fields{
 				"client.UserID": client.UserID,
 				"json":          string(j),
 			}).Infof("HandleOutboundMessages:OutboundMessages")
@@ -178,14 +189,12 @@ func (client *Client) HandleOutboundMessages(server *Server, readyChan chan bool
 			if err := w.Close(); err != nil {
 				return
 			}
+
+		// [CASE] Send a Ping. Are you still there?
 		case <-ticker.C:
-			logrus.WithFields(logrus.Fields{
-				"client.UserID":    client.UserID,
-				"client.SessionID": client.SessionID(),
-			}).Infof("HandleOutboundMessages:Ping")
+			logEntry.Infof("HandleOutboundMessages:Ping")
 			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				clientErr = err
 				return
 			}
 		}

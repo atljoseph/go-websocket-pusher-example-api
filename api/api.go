@@ -1,10 +1,7 @@
-// Copyright 2013 The Gorilla WebSocket Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"go-websocket-pusher-example-api/handlers"
@@ -14,41 +11,41 @@ import (
 )
 
 type API struct {
-	WebsocketServer *websocket.Server
+	*http.Server
 }
 
-func NewAPI(wss *websocket.Server) *API {
-	return &API{
-		WebsocketServer: wss,
+func NewAPI() *API {
+	return &API{}
+}
+
+func (api *API) Shutdown(ctx context.Context) error {
+	if api.Server != nil {
+		return api.Server.Shutdown(ctx)
 	}
+	return nil
 }
 
 // Run runs the API alongside a websocket server.
-func (api *API) Run(addr string) error {
-
-	// Start up a websocket server in the background.
-	// We'll feed events to it based on events traversing the HTTP server.
-	go api.WebsocketServer.Run()
+func (api *API) Run(ctx context.Context, addr string, wss *websocket.Server) error {
 
 	// Boot up a new HTTP router & add routed handlers for various events & for initiating websocket connections.
 	router := mux.NewRouter()
 	router.HandleFunc("/", handlers.HomeHttpHandler).Methods("GET")
 	router.HandleFunc("/chat-message", func(w http.ResponseWriter, r *http.Request) {
-		handlers.SendChatMessageHandler(api.WebsocketServer, w, r)
+		handlers.SendChatMessageHandler(wss, w, r)
 	}).Methods("POST")
 	router.HandleFunc("/system-message", func(w http.ResponseWriter, r *http.Request) {
-		handlers.SendSystemMessageHandler(api.WebsocketServer, w, r)
+		handlers.SendSystemMessageHandler(wss, w, r)
 	}).Methods("POST")
 	router.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handlers.InitializeWebsocketHandler(api.WebsocketServer, w, r)
+		handlers.InitializeWebsocketHandler(wss, w, r)
 	}).Methods("GET")
+	router.NotFoundHandler = router.NewRoute().HandlerFunc(http.NotFound).GetHandler()
 
 	// Finally, start the HTTP server.
-	err := http.ListenAndServe(addr, router)
-	if err != nil {
-		return err
+	api.Server = &http.Server{
+		Addr:    addr,
+		Handler: router,
 	}
-	return nil
+	return api.Server.ListenAndServe()
 }
-
-// TODO: api has a heartbeat. on the heartbeat, it checks things. if something found, notifies on websocket.

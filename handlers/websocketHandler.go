@@ -12,19 +12,22 @@ import (
 
 // InitializeWebsocketHandler handles websocket requests from the peer.
 func InitializeWebsocketHandler(wsServer *websocket.Server, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+	logrus.WithFields(logrus.Fields{
+		"r.URL": r.URL,
+	}).Infof("InitializeWebsocketHandler")
+
+	if wsServer.IsClosed() {
+		http.Error(w, "Websocket server has been closed", http.StatusBadRequest)
 	}
 
 	userID := r.FormValue("user_id")
 	if len(userID) == 0 {
-		http.Error(w, "UserID not provided", http.StatusMethodNotAllowed)
+		http.Error(w, "UserID not provided", http.StatusBadRequest)
 	}
 
 	chatRoomTopics := r.Form["rooms"]
 	if len(chatRoomTopics) == 0 {
-		http.Error(w, "Topics not provided", http.StatusMethodNotAllowed)
+		http.Error(w, "Topics not provided", http.StatusBadRequest)
 	}
 
 	conn, err := websocket.Upgrader.Upgrade(w, r, nil)
@@ -43,7 +46,7 @@ func InitializeWebsocketHandler(wsServer *websocket.Server, w http.ResponseWrite
 	wsServer.RegisterClient(client)
 }
 
-type SendInboundWebSocketUserMessageOnTopic struct {
+type InboundWebSocketMessageBody struct {
 	SessionID string                    `json:"session_id"`
 	UserID    string                    `json:"user_id"`
 	Topic     websocket.TopicDescriptor `json:"topic"`
@@ -56,9 +59,13 @@ func SendChatMessageHandler(wsServer *websocket.Server, w http.ResponseWriter, r
 		"r.URL": r.URL,
 	}).Infof("SendChatMessageHandler")
 
+	if wsServer.IsClosed() {
+		http.Error(w, "Websocket server has been closed", http.StatusBadRequest)
+	}
+
 	// Try to decode the request body into the struct. If there is an error,
 	// respond to the client with the error message and a 400 status code.
-	httpMessage := SendInboundWebSocketUserMessageOnTopic{}
+	httpMessage := InboundWebSocketMessageBody{}
 	err := json.NewDecoder(r.Body).Decode(&httpMessage)
 	if err != nil {
 		logrus.WithError(err).WithFields(logrus.Fields{
@@ -105,9 +112,13 @@ func SendSystemMessageHandler(wsServer *websocket.Server, w http.ResponseWriter,
 		"r.URL": r.URL,
 	}).Infof("SendSystemMessageHandler")
 
+	if wsServer.IsClosed() {
+		http.Error(w, "Websocket server has been closed", http.StatusBadRequest)
+	}
+
 	// Try to decode the request body into the struct. If there is an error,
 	// respond to the client with the error message and a 400 status code.
-	httpMessage := SendInboundWebSocketUserMessageOnTopic{}
+	httpMessage := InboundWebSocketMessageBody{}
 	err := json.NewDecoder(r.Body).Decode(&httpMessage)
 	if err != nil {
 		logrus.WithError(err).WithFields(logrus.Fields{
