@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Chat Example</title>
+<script type="text/javascript">
+window.onload = function () {
+    console.log("load")
+    var conn;
+    var userIDElement = document.getElementById("userIDElement");
+    var roomElement = document.getElementById("roomElement");
+    var sessionIDElement = document.getElementById("sessionIDElement");
+    var chatMsgElement = document.getElementById("chatMsgElement");
+    var systemMsgElement = document.getElementById("systemMsgElement");
+    var log = document.getElementById("log");
+
+    function appendLog(item) {
+        var doScroll = log.scrollTop > log.scrollHeight - log.clientHeight - 1;
+        log.appendChild(item);
+        if (doScroll) {
+            log.scrollTop = log.scrollHeight - log.clientHeight;
+        }
+    }
+
+   function sendHttp(method, url, jsonData) {
+        var http = new XMLHttpRequest();
+        http.open(method, url, true);
+        http.setRequestHeader("Content-type", "application/json");
+        http.send(jsonData);
+        http.onreadystatechange = (e) => {
+            if(http.readyState == 4 && http.status == 200) {
+                console.log('SUCCESSFUL HTTP CALL', http.responseText);
+            }
+        }
+    }
+    
+    document.getElementById("form-send-chat").onsubmit = function () {
+        try {
+            console.log("submit form-send-chat")
+            if (!conn) {
+                console.log("no websocket")
+                return false;
+            }
+            if (!userIDElement.value) {
+                console.log("no userIDElement")
+                return false;
+            }
+            if (!roomElement.value) {
+                console.log("no roomElement")
+                return false;
+            }
+            if (!chatMsgElement.value) {
+                console.log("no message")
+                return false;
+            }
+            // conn.send(chatMsgElement.value);
+            sendHttp('POST', 'http://localhost:8080/chat-message', JSON.stringify({
+                "session_id": sessionIDElement.value,
+                "user_id": userIDElement.value,
+                "topic": {
+                    "chat_room_name": roomElement.value,
+                },
+                "message": chatMsgElement.value
+            }));
+            chatMsgElement.value = "";
+        } catch(e) {
+                console.log("ERROR: " + e)
+        }
+        return false;
+    };
+
+    document.getElementById("form-send-system").onsubmit = function () {
+        try {
+            console.log("submit form-send-system")
+            if (!conn) {
+                console.log("no websocket")
+                return false;
+            }
+            if (!userIDElement.value) {
+                console.log("no userIDElement")
+                return false;
+            }
+            if (!roomElement.value) {
+                console.log("no roomElement")
+                return false;
+            }
+            if (!systemMsgElement.value) {
+                console.log("no message")
+                return false;
+            }
+            // conn.send(chatMsgElement.value);
+            sendHttp('POST', 'http://localhost:8080/system-message', JSON.stringify({
+                "session_id": sessionIDElement.value,
+                "user_id": userIDElement.value,
+                "topic": {
+                    "chat_room_name": roomElement.value,
+                },
+                "message": systemMsgElement.value
+            }));
+            chatMsgElement.value = "";
+        } catch(e) {
+                console.log("ERROR: " + e)
+        }
+        return false;
+    };
+
+    document.getElementById("form-register").onsubmit = function () {
+        try {
+            console.log("submit form-register")
+            if (!userIDElement.value) {
+                console.log("no userIDElement")
+                return false;
+            }
+            if (!roomElement.value) {
+                console.log("no roomElement")
+                return false;
+            }
+            // sendHttp('POST', 'http://localhost:8080/ws', JSON.stringify({
+            //     "user_id": userIDElement.value,
+            //     "rooms": [roomElement.value]
+            // }));
+            var queryParams = "?user_id=" + userIDElement.value + "&rooms=" + roomElement.value
+            console.log("data form-register: " + queryParams)
+            if (window["WebSocket"]) {
+                conn = new WebSocket("ws://" + document.location.host + "/ws" + queryParams);
+                conn.onopen = function (ws, evt) {
+                    console.log("websocket opened", ws)
+                    var item = document.createElement("div");
+                    item.innerHTML = "<b>Connection opened.</b>";
+                    appendLog(item);
+                };
+                conn.onclose = function (evt) {
+                    console.log("websocket closed", evt)
+                    var item = document.createElement("div");
+                    item.innerHTML = "<b>Connection closed.</b>";
+                    appendLog(item);
+                };
+                conn.onmessage = function (evt) {
+                    var jsonArray = JSON.parse(evt.data)
+                    console.log("websocket message", jsonArray)
+                    jsonArray.forEach(function(json) {
+                        console.log("json", json)
+                        console.log("type", json.topic.type === 'auth')
+                        if (json.topic && json.topic.type && json.topic.type === 'auth' && json.session_id) {
+                            sessionIDElement.value = json.session_id
+                        }
+                        var item = document.createElement("div");
+                        item.innerHTML = evt.data;
+                        appendLog(item);
+                    })
+                };
+            } else {
+                var item = document.createElement("div");
+                item.innerHTML = "<b>Your browser does not support WebSockets.</b>";
+                appendLog(item);
+            }
+
+        } catch(e) {
+            console.log("ERROR: " + e)
+        }
+        return false;
+    };
+};
+</script>
+<style type="text/css">
+html {
+    overflow: hidden;
+}
+
+body {
+    overflow: hidden;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    background: gray;
+}
+
+#log {
+    background: white;
+    margin: 0;
+    padding: 0.5em 0.5em 0.5em 0.5em;
+    position: absolute;
+    top: 0.5em;
+    left: 0.5em;
+    right: 0.5em;
+    bottom: 25%;
+    overflow: auto;
+}
+
+#form-register {
+    padding: 0 0.5em 0 0.5em;
+    margin: 0;
+    position: absolute;
+    bottom: 15%;
+    left: 0px;
+    width: 100%;
+    overflow: hidden;
+}
+
+#form-send-chat {
+    padding: 0 0.5em 0 0.5em;
+    margin: 0;
+    position: absolute;
+    bottom: 10%;
+    left: 0px;
+    width: 100%;
+    overflow: hidden;
+}
+
+#form-send-system {
+    padding: 0 0.5em 0 0.5em;
+    margin: 0;
+    position: absolute;
+    bottom: 5%;
+    left: 0px;
+    width: 100%;
+    overflow: hidden;
+}
+
+</style>
+</head>
+<body>
+<div id="log"></div>
+<form id="form-register">
+    <input type="submit" value="Register" />
+    <input type="text" id="userIDElement" size="64" placeholder="UserID" autofocus />
+    <input type="text" id="roomElement" size="64" placeholder="ChatRoomName" autofocus />
+    <input type="text" id="sessionIDElement" size="64" placeholder="SessionID" autofocus />
+</form>
+<form id="form-send-chat">
+    <input type="submit" value="Send Chat Message" />
+    <input type="text" id="chatMsgElement" size="64" placeholder="Chat Message" autofocus />
+</form>
+<form id="form-send-system">
+    <input type="submit" value="Send System Message" />
+    <input type="text" id="systemMsgElement" size="64" placeholder="System Message" autofocus />
+</form>
+</body>
+</html>
