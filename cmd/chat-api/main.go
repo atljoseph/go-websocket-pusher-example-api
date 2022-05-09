@@ -45,6 +45,10 @@ func main() {
 
 	// Block & Listen here for shutdown events.
 	defer func() {
+		logrus.Info("Gracefully shutting down server...")
+		cancel()
+		_ = chatAPI.Shutdown(ctx)
+
 		logrus.Info("Shutting down")
 		os.Exit(0)
 	}()
@@ -53,9 +57,6 @@ func main() {
 		select {
 		case sig := <-sigquit:
 			logrus.Infof("caught sig: %+v", sig)
-			logrus.Info("Gracefully shutting down server...")
-			cancel()
-			_ = chatAPI.Shutdown(ctx)
 			return
 		case <-ctx.Done():
 			logrus.Infof("context cancelled; quitting server")
