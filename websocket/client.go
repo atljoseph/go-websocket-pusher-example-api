@@ -115,11 +115,11 @@ func (c *client) SendMessage(m Message) bool {
 // // ensures that there is at most one reader on a connection by executing all
 // // reads from this goroutine.
 // func (c *client) HandleInboundMessages(server *Server) {
-// 	fmt.Println("HandleInboundMessages.Start", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID)
+// 	fmt.Println("HandleInboundMessages.Start", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID())
 // 	defer func() {
 // 		server.UnregisterClient(c)
 // 		c.conn.Close()
-// 		fmt.Println("HandleInboundMessages.End", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID)
+// 		fmt.Println("HandleInboundMessages.End", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID())
 // 	}()
 // 	c.conn.SetReadLimit(maxMessageSize)
 // 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -134,7 +134,7 @@ func (c *client) SendMessage(m Message) bool {
 // 		}
 // 		byteSlice = bytes.TrimSpace(bytes.Replace(byteSlice, newline, space, -1))
 // 		message := Message{Text: string(byteSlice)}
-// 		fmt.Println("InboundMessage", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID, message)
+// 		fmt.Println("InboundMessage", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID(), message)
 // 		message.Text = "Heyoo: " + message.Text
 // 		server.broadcastChan <- message
 // 		// DO SOMETHNG WITH INCOMING MESSAGE HERE.
@@ -147,7 +147,7 @@ func (c *client) Close(err error) {
 		errBytes = []byte(err.Error())
 	}
 	logrus.WithError(err).WithFields(logrus.Fields{
-		"UserID":    c.UserID,
+		"UserID":    c.UserID(),
 		"SesisonID": c.SessionID(),
 	}).Infof("closing client")
 	if c.conn != nil {
@@ -164,7 +164,7 @@ func (c *client) Close(err error) {
 // executing all writes from this goroutine.
 func (c *client) HandleOutboundMessages(ctx context.Context, readyChan chan bool) {
 	logEntry := logrus.WithFields(logrus.Fields{
-		"client.UserID":    c.UserID,
+		"client.UserID":    c.UserID(),
 		"client.SessionID": c.SessionID(),
 	})
 	logEntry.Infof("HandleOutboundMessages:Start")
@@ -214,7 +214,7 @@ func (c *client) HandleOutboundMessages(ctx context.Context, readyChan chan bool
 				return
 			}
 			logEntry.WithFields(logrus.Fields{
-				"client.UserID": c.UserID,
+				"client.UserID": c.UserID(),
 				"json":          string(j),
 			}).Infof("HandleOutboundMessages:OutboundMessages")
 			w.Write([]byte(j))
