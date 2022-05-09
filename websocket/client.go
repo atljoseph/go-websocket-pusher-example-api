@@ -37,18 +37,30 @@ var Upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+type Client interface {
+	SessionID() string
+	UserID() string
+	Topics() []TopicDescriptor
+	Close(error)
+	HandleOutboundMessages(context.Context, chan bool)
+	SendMessage(m Message) bool
+}
+
+// Compile time verification that *client implements the Client interface
+var _ Client = (*client)(nil)
+
 // Client represents a websocket connection for a single User.
 // NOTE: It is a middleman between the websocket connection and the server.
-type Client struct {
+type client struct {
 
 	// sessionID for the Client, so we can tell if a user has been registered already before or not.
 	sessionID string
 
 	// The UserID for the connection.
-	UserID string
+	userID string
 
 	// The Topics in which the user is interested.
-	Topics []TopicDescriptor
+	topics []TopicDescriptor
 	// Topics map[TopicDescriptor]struct{}
 
 	// The websocket connection.
@@ -58,24 +70,41 @@ type Client struct {
 	send chan Message
 }
 
-func NewClient(userID string, topics []TopicDescriptor, conn *websocket.Conn, send chan Message) *Client {
+func NewClient(userID string, topics []TopicDescriptor, conn *websocket.Conn, send chan Message) Client {
 	// topicsMap := make(map[TopicDescriptor]struct{})
 	// for _, topicDescriptor := range topics {
 	// 	topicsMap[topicDescriptor] = struct{}{}
 	// }
 	uuid := uuid.New()
 	sessionID := uuid.String()
-	return &Client{
+	return &client{
 		sessionID: sessionID,
-		UserID:    userID,
-		Topics:    topics,
+		userID:    userID,
+		topics:    topics,
 		conn:      conn,
 		send:      send,
 	}
 }
 
-func (client *Client) SessionID() string {
-	return client.sessionID
+func (c *client) SessionID() string {
+	return c.sessionID
+}
+
+func (c *client) UserID() string {
+	return c.userID
+}
+
+func (c *client) Topics() []TopicDescriptor {
+	return c.topics
+}
+
+func (c *client) SendMessage(m Message) bool {
+	select {
+	case c.send <- m:
+		return true
+	default:
+		return false
+	}
 }
 
 // NOTE: I chose to do only pushing with this websocket in order to keep things lightweight.
@@ -85,7 +114,7 @@ func (client *Client) SessionID() string {
 // // The application runs readPump in a per-connection goroutine. The application
 // // ensures that there is at most one reader on a connection by executing all
 // // reads from this goroutine.
-// func (c *Client) HandleInboundMessages(server *Server) {
+// func (c *client) HandleInboundMessages(server *Server) {
 // 	fmt.Println("HandleInboundMessages.Start", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID)
 // 	defer func() {
 // 		server.UnregisterClient(c)
@@ -112,19 +141,20 @@ func (client *Client) SessionID() string {
 // 	}
 // }
 
-func (client *Client) Close(err error) {
+func (c *client) Close(err error) {
 	errBytes := []byte{}
 	if err != nil {
 		errBytes = []byte(err.Error())
 	}
 	logrus.WithError(err).WithFields(logrus.Fields{
-		"UserID":    client.UserID,
-		"SesisonID": client.SessionID(),
+		"UserID":    c.UserID,
+		"SesisonID": c.SessionID(),
 	}).Infof("closing client")
-	if client.conn != nil {
-		client.conn.WriteMessage(websocket.CloseMessage, errBytes)
-		client.conn.Close()
+	if c.conn != nil {
+		c.conn.WriteMessage(websocket.CloseMessage, errBytes)
+		c.conn.Close()
 	}
+	close(c.send)
 }
 
 // HandleOutboundMessages pumps messages from the server to the websocket connection.
@@ -132,10 +162,10 @@ func (client *Client) Close(err error) {
 // A goroutine running writePump is started for each connection. The
 // application ensures that there is at most one writer to a connection by
 // executing all writes from this goroutine.
-func (client *Client) HandleOutboundMessages(ctx context.Context, server Server, readyChan chan bool) {
+func (c *client) HandleOutboundMessages(ctx context.Context, readyChan chan bool) {
 	logEntry := logrus.WithFields(logrus.Fields{
-		"client.UserID":    client.UserID,
-		"client.SessionID": client.SessionID(),
+		"client.UserID":    c.UserID,
+		"client.SessionID": c.SessionID(),
 	})
 	logEntry.Infof("HandleOutboundMessages:Start")
 	ticker := time.NewTicker(pingPeriod)
@@ -154,27 +184,27 @@ func (client *Client) HandleOutboundMessages(ctx context.Context, server Server,
 			return
 
 		// [CASE] Receive a message from the Server to convey to the Client's Connection.
-		case message, ok := <-client.send:
+		case message, ok := <-c.send:
 			logEntry.WithFields(logrus.Fields{
 				"message": message,
 				"ok":      ok,
 			}).Infof("client: send")
-			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				return
 			}
 
-			numExtraMessages := len(client.send)
+			numExtraMessages := len(c.send)
 			messages := make([]Message, numExtraMessages+1)
 			messages[0] = message
 			for i := 1; i == numExtraMessages; i++ {
-				extraMessage, ok := <-client.send
+				extraMessage, ok := <-c.send
 				if ok {
 					messages[i] = extraMessage
 				}
 			}
 
-			w, err := client.conn.NextWriter(websocket.TextMessage)
+			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
 				return
 			}
@@ -184,7 +214,7 @@ func (client *Client) HandleOutboundMessages(ctx context.Context, server Server,
 				return
 			}
 			logEntry.WithFields(logrus.Fields{
-				"client.UserID": client.UserID,
+				"client.UserID": c.UserID,
 				"json":          string(j),
 			}).Infof("HandleOutboundMessages:OutboundMessages")
 			w.Write([]byte(j))
@@ -196,8 +226,8 @@ func (client *Client) HandleOutboundMessages(ctx context.Context, server Server,
 		// [CASE] Send a Ping. Are you still there?
 		case <-ticker.C:
 			logEntry.Infof("HandleOutboundMessages:Ping")
-			client.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
