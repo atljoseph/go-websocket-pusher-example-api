@@ -11,7 +11,7 @@ import (
 )
 
 // InitializeWebsocketHandler handles websocket requests from the peer.
-func InitializeWebsocketHandler(wsServer *websocket.Server, w http.ResponseWriter, r *http.Request) {
+func InitializeWebsocketHandler(wsServer websocket.Server, w http.ResponseWriter, r *http.Request) {
 	logrus.WithFields(logrus.Fields{
 		"r.URL": r.URL,
 	}).Infof("InitializeWebsocketHandler")
@@ -54,7 +54,7 @@ type InboundWebSocketMessageBody struct {
 }
 
 // SendChatMessageHandler handles sending an inbound message to the API & websocket.
-func SendChatMessageHandler(wsServer *websocket.Server, w http.ResponseWriter, r *http.Request) {
+func SendChatMessageHandler(wsServer websocket.Server, w http.ResponseWriter, r *http.Request) {
 	logrus.WithFields(logrus.Fields{
 		"r.URL": r.URL,
 	}).Infof("SendChatMessageHandler")
@@ -107,7 +107,7 @@ func SendChatMessageHandler(wsServer *websocket.Server, w http.ResponseWriter, r
 }
 
 // SendSystemMessageHandler handles sending an inbound message to the API & websocket.
-func SendSystemMessageHandler(wsServer *websocket.Server, w http.ResponseWriter, r *http.Request) {
+func SendSystemMessageHandler(wsServer websocket.Server, w http.ResponseWriter, r *http.Request) {
 	logrus.WithFields(logrus.Fields{
 		"r.URL": r.URL,
 	}).Infof("SendSystemMessageHandler")

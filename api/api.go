@@ -26,7 +26,7 @@ func (api *API) Shutdown(ctx context.Context) error {
 }
 
 // Run runs the API alongside a websocket server.
-func (api *API) Run(ctx context.Context, addr string, wss *websocket.Server) error {
+func (api *API) Run(ctx context.Context, addr string, wss websocket.Server) error {
 
 	// Boot up a new HTTP router & add routed handlers for various events & for initiating websocket connections.
 	router := mux.NewRouter()
