@@ -182,9 +182,15 @@ func (server *Server) Run(ctx context.Context) {
 	if server._isClosed {
 		return
 	}
-	defer server.Close()
 
-	// Infinite loop.
+	// Start a ticker and defer closing a few things on the way out.
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer func() {
+		ticker.Stop()
+		server.Close()
+	}()
+
+	// Infinite loop w/ a heartbeat.
 	for {
 		// Select the first channel that has a value in it.
 		select {
@@ -213,9 +219,11 @@ func (server *Server) Run(ctx context.Context) {
 		case message := <-server.broadcastChan:
 			go broadcastMessageToTopic(ctx, server, message)
 
-			// default:
-			// 	logrus.Infof("hey!")
+		// [CASE] Slow down the loop a bit.
+		case <-ticker.C:
+			// Only loop as often as the ticker's period.
 		}
+
 	}
 }
 
@@ -312,7 +320,7 @@ func broadcastMessageToTopic(ctx context.Context, server *Server, m MessageForBr
 		// [CASE] Context was cancelled, and we need to bail!
 		case <-ctx.Done():
 			logrus.Infof("server context cancelled; quitting broadcastMessageToTopic goroutine")
-			close(server.broadcastChan)
+			server.Close()
 			return
 
 		// [CASE] Send the message!

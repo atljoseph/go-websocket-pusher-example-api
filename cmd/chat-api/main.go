@@ -20,7 +20,7 @@ func main() {
 	flag.Parse()
 
 	// Get conext and cancel from the background, then start up the servers.
-	// ctx, cancel := context.WithTimeout(context.Background(), time.Duration(15 * time.Second))
+	// ctx, cancel := context.WithTimeout(context.Background(), time.Duration(15*time.Second))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -61,8 +61,7 @@ func main() {
 			logrus.Infof("context cancelled; quitting server")
 			return
 		case <-ticker.C:
-			// Only loop every second.
+			// Loop as often as every second.
 		}
 	}
-
 }
