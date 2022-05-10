@@ -21,12 +21,15 @@ const (
 	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer.
+	// TODO: This is unused. Can it be removed?
 	maxMessageSize = 512
 )
 
 var (
+	// TODO: This is unused. Can it be removed?
 	newline = []byte{'\n'}
-	space   = []byte{' '}
+	// TODO: This is unused. Can it be removed?
+	space = []byte{' '}
 )
 
 var Upgrader = websocket.Upgrader{
@@ -129,7 +132,7 @@ func (client *Client) Close(err error) {
 // A goroutine running writePump is started for each connection. The
 // application ensures that there is at most one writer to a connection by
 // executing all writes from this goroutine.
-func (client *Client) HandleOutboundMessages(ctx context.Context, server *Server, readyChan chan bool) {
+func (client *Client) HandleOutboundMessages(ctx context.Context, server Server, readyChan chan bool) {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"client.UserID":    client.UserID,
 		"client.SessionID": client.SessionID(),
