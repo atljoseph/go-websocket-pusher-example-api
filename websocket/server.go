@@ -25,8 +25,8 @@ type Server interface {
 	IsClosed() bool
 	Close()
 	TopicIsRegistered(TopicDescriptor) bool
-	RegisterClient(*Client)
-	UnregisterClient(*Client)
+	RegisterClient(Client)
+	UnregisterClient(Client)
 	BroadcastMessage(MessageForBroadcast) error
 	Run(context.Context)
 }
@@ -39,7 +39,7 @@ type server struct {
 	mutex sync.RWMutex
 
 	// Registered clientsByUserID & mutex.
-	clientsByUserID map[string]*Client
+	clientsByUserID map[string]Client
 
 	// Registered userIDsByTopicDescriptor & mutex.
 	userIDsByTopicDescriptor map[TopicDescriptor]map[string]struct{}
@@ -48,10 +48,10 @@ type server struct {
 	broadcastChan chan MessageForBroadcast
 
 	// Register requests from the clients.
-	registerClientChan chan *Client
+	registerClientChan chan Client
 
 	// Unregister requests from clients after each Message is sent.
-	unregisterClientChan chan *Client
+	unregisterClientChan chan Client
 
 	_isClosed bool
 }
@@ -61,11 +61,11 @@ func NewServer() Server {
 	userIDsByTopicDescriptor := make(map[TopicDescriptor]map[string]struct{})
 	userIDsByTopicDescriptor[systemTopic] = make(map[string]struct{})
 	return &server{
-		clientsByUserID:          make(map[string]*Client),
+		clientsByUserID:          make(map[string]Client),
 		userIDsByTopicDescriptor: userIDsByTopicDescriptor,
 		broadcastChan:            make(chan MessageForBroadcast),
-		registerClientChan:       make(chan *Client),
-		unregisterClientChan:     make(chan *Client),
+		registerClientChan:       make(chan Client),
+		unregisterClientChan:     make(chan Client),
 	}
 }
 
@@ -97,24 +97,24 @@ func (s *server) TopicIsRegistered(topic TopicDescriptor) bool {
 }
 
 // RegisterClient should be called by system resources to Register Client(s).
-func (s *server) RegisterClient(client *Client) {
+func (s *server) RegisterClient(c Client) {
 	if s._isClosed {
 		return
 	}
 	logrus.WithFields(logrus.Fields{
-		"client.UserID":    client.UserID,
-		"client.SessionID": client.SessionID(),
+		"client.UserID":    c.UserID(),
+		"client.SessionID": c.SessionID(),
 	}).Infof("RegisterClient")
 	// Send this client into the `registerClientChan`. The receiver will register the Client for the declared Topics.
-	s.registerClientChan <- client
+	s.registerClientChan <- c
 }
 
 // UnregisterClient should be called by system resources to Unregister Client(s).
-func (s *server) UnregisterClient(client *Client) {
+func (s *server) UnregisterClient(c Client) {
 	if s._isClosed {
 		return
 	}
-	s.unregisterClientChan <- client
+	s.unregisterClientChan <- c
 }
 
 // BroadcastMessage should be called by system resources to send messages to Client(s).
@@ -167,7 +167,7 @@ func (s *server) BroadcastMessage(bm MessageForBroadcast) error {
 		}
 
 		// Confirm user is subscribed on the Topic.
-		for _, topicDescriptor := range toClient.Topics {
+		for _, topicDescriptor := range toClient.Topics() {
 			if topicDescriptor == bm.Message.Topic {
 				foundTopic = true
 				break
@@ -242,31 +242,31 @@ func (s *server) Run(ctx context.Context) {
 
 // actuateRegisterClient is what the Server uses to actually register a Client.
 // NOTE: This may be called on a goroutine, as it acts in reaction to data sent into a channel.
-func (s *server) actuateRegisterClient(ctx context.Context, c *Client) {
+func (s *server) actuateRegisterClient(ctx context.Context, c Client) {
 	logrus.WithFields(logrus.Fields{
-		"client.UserID":    c.UserID,
+		"client.UserID":    c.UserID(),
 		"client.SessionID": c.SessionID(),
 	}).Infof("actuateRegisterClient")
 
 	// Allow collection of memory referenced by the caller by doing all work in
 	// new goroutines.
 	readyChan := make(chan bool)
-	go c.HandleOutboundMessages(ctx, s, readyChan)
+	go c.HandleOutboundMessages(ctx, readyChan)
 
 	// Track the client in various maps so that we can relate it to many topics.
 	s.mutex.Lock()
-	if currentClient, ok := s.clientsByUserID[c.UserID]; ok {
+	if currentClient, ok := s.clientsByUserID[c.UserID()]; ok {
 		if currentClient.SessionID() != c.SessionID() {
 			currentClient.Close(errAlreadyRegistered)
 		}
 	}
-	s.clientsByUserID[c.UserID] = c
-	for _, topic := range c.Topics {
+	s.clientsByUserID[c.UserID()] = c
+	for _, topic := range c.Topics() {
 		userIDsForTopic, topicIsRegistered := s.userIDsByTopicDescriptor[topic]
 		if !topicIsRegistered || userIDsForTopic == nil {
 			s.userIDsByTopicDescriptor[topic] = make(map[string]struct{})
 		}
-		s.userIDsByTopicDescriptor[topic][c.UserID] = struct{}{}
+		s.userIDsByTopicDescriptor[topic][c.UserID()] = struct{}{}
 	}
 	s.mutex.Unlock()
 
@@ -275,7 +275,7 @@ func (s *server) actuateRegisterClient(ctx context.Context, c *Client) {
 	// We judiciously ue the goroutines below, since are already on a goroutine!
 	<-readyChan
 	go s.broadcastMessageToTopic(ctx, MessageForBroadcast{
-		ToUserID: c.UserID,
+		ToUserID: c.UserID(),
 		Message: Message{
 			SessionID: c.SessionID(),
 			Topic: TopicDescriptor{
@@ -283,13 +283,16 @@ func (s *server) actuateRegisterClient(ctx context.Context, c *Client) {
 			},
 		},
 	})
-	for _, topic := range c.Topics {
-		fmt.Println("NotifyTopicOfJoin", time.Now().Format("2006-01-02 15:04:05 Z"), c.UserID, topic)
+	for _, topic := range c.Topics() {
+		logrus.WithFields(logrus.Fields{
+			"topic":  topic,
+			"userID": c.UserID(),
+		}).Info("NotifyTopicOfJoin")
 		go s.broadcastMessageToTopic(ctx, MessageForBroadcast{
 			Message: Message{
 				FromUserID: SystemUserID,
 				Topic:      topic,
-				Text:       fmt.Sprintf("UserID '%s' has joined Room '%s'.", c.UserID, topic.ChatRoomName),
+				Text:       fmt.Sprintf("UserID '%s' has joined Room '%s'.", c.UserID(), topic.ChatRoomName),
 			},
 		})
 	}
@@ -297,20 +300,20 @@ func (s *server) actuateRegisterClient(ctx context.Context, c *Client) {
 
 // actuateRegisterClient is what the Server uses to actually de-register a Client, for whatever reason.
 // NOTE: This may be called on a goroutine, as it acts in reaction to data sent into a channel.
-func (s *server) actuateUnregisterClient(c *Client, err error) {
+func (s *server) actuateUnregisterClient(c Client, err error) {
 	logrus.WithFields(logrus.Fields{
-		"c.UserID": c.UserID,
+		"c.UserID": c.UserID(),
 	}).Infof("UnregisterClient")
 
 	// Unregister Client from all Topics, then remove Client.
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	if _, ok := s.clientsByUserID[c.UserID]; ok {
-		delete(s.clientsByUserID, c.UserID)
-		close(c.send)
-	}
+
+	// Remove from clientsByUserID map if it exists.
+	// If it doesn't exist, this call does nothing.
+	delete(s.clientsByUserID, c.UserID())
 	for topic := range s.userIDsByTopicDescriptor {
-		delete(s.userIDsByTopicDescriptor[topic], c.UserID)
+		delete(s.userIDsByTopicDescriptor[topic], c.UserID())
 	}
 	c.Close(err)
 }
@@ -324,7 +327,7 @@ func (s *server) broadcastMessageToTopic(ctx context.Context, m MessageForBroadc
 	logEntry.Infof("broadcastMessageToTopic")
 
 	// The `actuateSendMessageToClient` function is used by a couple cases below.
-	actuateSendMessageToClient := func(ctx context.Context, srv *server, client *Client, broadcastMessage MessageForBroadcast) {
+	actuateSendMessageToClient := func(ctx context.Context, srv *server, client Client, broadcastMessage MessageForBroadcast) {
 		select {
 
 		// [CASE] Context was cancelled, and we need to bail!
@@ -333,14 +336,18 @@ func (s *server) broadcastMessageToTopic(ctx context.Context, m MessageForBroadc
 			srv.Close()
 			return
 
-		// [CASE] Send the message!
-		case client.send <- broadcastMessage.Message:
-			logrus.Infof("broadcastMessageToTopic: send")
-
-		// [CASE] Unresponsive client.
+			// [CASE] Send message!
 		default:
-			logrus.Infof("broadcastMessageToTopic: unregister due to unresponsiveness")
-			s.actuateUnregisterClient(client, errUndeliverableClient)
+			ok := client.SendMessage(broadcastMessage.Message)
+			if ok {
+				logrus.Infof("broadcastMessageToTopic: send")
+
+				// Unable to send the message
+			} else {
+				logrus.Infof("broadcastMessageToTopic: unregister due to unresponsiveness")
+				s.actuateUnregisterClient(client, errUndeliverableClient)
+			}
+
 		}
 	}
 
